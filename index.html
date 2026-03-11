@@ -4,6 +4,53 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>ClipGen AI</title>
+
+<!-- PWA Manifest (inline) -->
+<script>
+(function(){
+  var manifest={
+    name:"ClipGen AI",
+    short_name:"ClipGen",
+    description:"AI-powered short video ordering platform",
+    start_url:"./",
+    display:"standalone",
+    background_color:"#06060A",
+    theme_color:"#9D71FF",
+    orientation:"portrait",
+    icons:[
+      {src:"https://via.placeholder.com/192x192/9D71FF/ffffff?text=CG",sizes:"192x192",type:"image/png",purpose:"any maskable"},
+      {src:"https://via.placeholder.com/512x512/9D71FF/ffffff?text=CG",sizes:"512x512",type:"image/png",purpose:"any maskable"}
+    ]
+  };
+  var blob=new Blob([JSON.stringify(manifest)],{type:'application/json'});
+  var url=URL.createObjectURL(blob);
+  var link=document.createElement('link');
+  link.rel='manifest';link.href=url;
+  document.currentScript.parentNode.insertBefore(link,document.currentScript);
+})();
+</script>
+
+<!-- PWA Meta Tags -->
+<meta name="application-name" content="ClipGen AI">
+<meta name="description" content="AI-powered short video ordering platform">
+<meta name="theme-color" content="#9D71FF">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ClipGen AI">
+
+<!-- Service Worker Registration -->
+<script>
+if('serviceWorker' in navigator){
+  window.addEventListener('load',function(){
+    var swCode="self.addEventListener('install',function(e){e.waitUntil(caches.open('clipgen-v1').then(function(c){return c.addAll(['./',]);}));});self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request);}));});";
+    var blob=new Blob([swCode],{type:'application/javascript'});
+    var url=URL.createObjectURL(blob);
+    navigator.serviceWorker.register(url).catch(function(){});
+  });
+}
+</script>
+
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
