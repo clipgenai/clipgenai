@@ -4,7 +4,7 @@
   "description": "AI-powered short video ordering platform",
   "start_url": "/clipgenai/",
   "scope": "/clipgenai/",
-  "display": "fullscreen",
+  "display": "standalone",
   "background_color": "#06060A",
   "theme_color": "#9D71FF",
   "orientation": "portrait-primary",
@@ -14,13 +14,25 @@
       "src": "/clipgenai/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/clipgenai/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
     },
     {
       "src": "/clipgenai/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/clipgenai/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ],
   "screenshots": [
