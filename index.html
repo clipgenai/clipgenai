@@ -905,22 +905,37 @@ var S={
       await window.DB.saveItem('users',adminUser);
     }
 
-    // Restore session from localStorage (just stores user id)
-    var sess=localStorage.getItem('sas_ss');
-    if(sess){
+    // Restore session from localStorage — validate user still exists in Firestore
+    var savedSess=localStorage.getItem('sas_ss');
+    if(savedSess){
       try{
-        var s=JSON.parse(sess);
-        var u=this.users.find(function(u){return u.id===s.id});
-        if(u){this.user=u;this.isAdmin=u.isAdmin;}
-      }catch(e){}
+        var s=JSON.parse(savedSess);
+        // Verify user document still exists in Firestore (catches deleted accounts on refresh)
+        var freshUserDoc=await window.dbGet('users', s.id);
+        if(freshUserDoc){
+          this.user=freshUserDoc;
+          this.isAdmin=freshUserDoc.isAdmin;
+          // Update cache with fresh Firestore data
+          var cIdx=window.DB._cache.users.findIndex(function(u){return u.id===freshUserDoc.id;});
+          if(cIdx>-1) window.DB._cache.users[cIdx]=freshUserDoc;
+          else window.DB._cache.users.push(freshUserDoc);
+        } else {
+          // User no longer exists in Firestore — wipe stale session
+          localStorage.removeItem('sas_ss');
+          Object.keys(localStorage).forEach(function(k){if(k.slice(0,4)==='sas_')localStorage.removeItem(k);});
+        }
+      }catch(e){
+        localStorage.removeItem('sas_ss');
+      }
     }
 
     // Remove loading overlay and render
     var ldEl=document.getElementById('_fbLoad');
     if(ldEl)ldEl.remove();
     render();
-    // Start realtime chat if already logged in
-    if(S.user) startRealtimeChat();
+    // Always start realtime listeners — handles live deletion even while app is open
+    startRealtimeListeners();
+    if(S.user && !S.isAdmin) startSessionCheck();
   }
 };
 
@@ -988,19 +1003,38 @@ function doLogin(opts){
   if(!u){u={id:uid(),name:opts.name,email:opts.email,password:opts.password,isAdmin:false,method:opts.method||'email',createdAt:new Date().toISOString()};users.push(u);S.users=users}
   sess(u);
 }
-function sess(u){S.user=u;S.isAdmin=u.isAdmin;localStorage.setItem('sas_ss',JSON.stringify({id:u.id}));toast('g','Welcome, '+u.name.split(' ')[0]);setTimeout(function(){render();startRealtimeChat();},280)}
-function logout(){stopRealtimeListeners();localStorage.removeItem('sas_ss');S.user=null;S.isAdmin=false;S.page='dash';toast('a','Signed out');setTimeout(render,200)}
+function sess(u){S.user=u;S.isAdmin=u.isAdmin;localStorage.setItem('sas_ss',JSON.stringify({id:u.id}));toast('g','Welcome, '+u.name.split(' ')[0]);setTimeout(function(){render();startRealtimeListeners();startSessionCheck();},280)}
+function logout(){stopRealtimeListeners();stopSessionCheck();localStorage.removeItem('sas_ss');S.user=null;S.isAdmin=false;S.page='dash';toast('a','Signed out');setTimeout(render,200)}
 function forceLogout(){
   stopRealtimeListeners();
+  // Clear all session and auth data
   localStorage.removeItem('sas_ss');
   try{sessionStorage.clear();}catch(e){}
   Object.keys(localStorage).forEach(function(k){if(k.slice(0,4)==='sas_')localStorage.removeItem(k);});
+  // Clear cookies
+  try{document.cookie.split(';').forEach(function(c){document.cookie=c.replace(/^ +/,'').replace(/=.*/,'=;expires='+new Date().toUTCString()+';path=/');});}catch(e){}
   S.user=null;S.isAdmin=false;S.page='dash';
   toast('r','Account removed','Your account was deleted by an administrator');
+  // Force redirect to login immediately — no way to navigate back
   setTimeout(function(){
-    render();
-    if($('app')&&!S.user){$('app').innerHTML=rAuth('login');bindAuth();}
+    $('app').innerHTML=rAuth('login');
+    bindAuth();
   },400);
+}
+
+// Periodic deletion check — every 30s verify the session user still exists in Firestore
+var _sessionCheckInterval=null;
+function startSessionCheck(){
+  if(_sessionCheckInterval) clearInterval(_sessionCheckInterval);
+  _sessionCheckInterval=setInterval(function(){
+    if(!S.user||S.isAdmin) return;
+    window.dbGet('users', S.user.id).then(function(doc){
+      if(!doc) forceLogout();
+    }).catch(function(){});
+  }, 30000);
+}
+function stopSessionCheck(){
+  if(_sessionCheckInterval){clearInterval(_sessionCheckInterval);_sessionCheckInterval=null;}
 }
 
 // -- USER LAYOUT -------------------------------------------
@@ -2583,7 +2617,32 @@ function appPay(id){
   toast('g','Payment approved','Plan activated');swATab('payments');
 }
 function rejPay(id){if(!confirm('Reject this payment?'))return;var pays=S.pays,p=pays.find(function(p){return p.id===id});if(p)p.status='rejected';S.pays=pays;toast('a','Payment rejected');swATab('payments')}
-function delUser(id){if(!confirm('Delete user and all their data? This cannot be undone.'))return;S.users=S.users.filter(function(u){return u.id!==id});S.orders=S.orders.filter(function(o){return o.userId!==id});S.subs=S.subs.filter(function(s){return s.userId!==id});S.pays=S.pays.filter(function(p){return p.userId!==id});S.vids=S.vids.filter(function(v){return v.userId!==id});toast('a','User deleted');swATab('users')}
+function delUser(id){
+  if(!confirm('Delete user and all their data? This cannot be undone.'))return;
+
+  // 1. Delete the user document directly from Firestore (not just filter array)
+  window.dbDel('users', id).catch(function(e){console.error('delUser Firestore err:',e);});
+
+  // 2. Delete all related records from Firestore individually
+  var toDelOrders=window.DB._cache.orders.filter(function(o){return o.userId===id;});
+  var toDelSubs=window.DB._cache.subs.filter(function(s){return s.userId===id;});
+  var toDelPays=window.DB._cache.pays.filter(function(p){return p.userId===id;});
+  var toDelVids=window.DB._cache.vids.filter(function(v){return v.userId===id;});
+  toDelOrders.forEach(function(o){window.dbDel('orders',o.id).catch(function(){});});
+  toDelSubs.forEach(function(s){window.dbDel('subs',s.id).catch(function(){});});
+  toDelPays.forEach(function(p){window.dbDel('pays',p.id).catch(function(){});});
+  toDelVids.forEach(function(v){window.dbDel('vids',v.id).catch(function(){});});
+
+  // 3. Also update in-memory cache immediately for instant UI feedback
+  window.DB._cache.users=window.DB._cache.users.filter(function(u){return u.id!==id;});
+  window.DB._cache.orders=window.DB._cache.orders.filter(function(o){return o.userId!==id;});
+  window.DB._cache.subs=window.DB._cache.subs.filter(function(s){return s.userId!==id;});
+  window.DB._cache.pays=window.DB._cache.pays.filter(function(p){return p.userId!==id;});
+  window.DB._cache.vids=window.DB._cache.vids.filter(function(v){return v.userId!==id;});
+
+  toast('a','User deleted');
+  swATab('users');
+}
 function addUser(){var n=$('nuN')&&$('nuN').value.trim(),e=$('nuE')&&$('nuE').value.trim(),p=$('nuP')&&$('nuP').value.trim();if(!n||!e||!p){toast('r','Fill all fields');return}if(S.users.find(function(u){return u.email===e})){toast('r','Email already exists');return}var users=S.users;users.push({id:uid(),name:n,email:e,password:p,isAdmin:false,createdAt:new Date().toISOString()});S.users=users;hideM('aMod');toast('g','User added');swATab('users')}
 function grantSub(){var uid2=$('gsU')&&$('gsU').value,pid=$('gsP')&&$('gsP').value,plan=S.cfg.plans.find(function(p){return p.id===pid});if(!plan)return;var subs=S.subs,i=subs.findIndex(function(s){return s.userId===uid2&&s.active});if(i>-1)subs[i].active=false;var end=new Date();plan.period==='Yearly'?end.setFullYear(end.getFullYear()+1):end.setMonth(end.getMonth()+1);subs.push({id:uid(),userId:uid2,planId:plan.id,planName:plan.name,totalVideos:plan.videos,usedVideos:0,active:true,startDate:new Date().toISOString(),endDate:end.toISOString()});S.subs=subs;hideM('aMod');toast('g','Plan granted successfully');swATab('users')}
 function savePlan(){var n=$('npN')&&$('npN').value.trim(),per=$('npP')&&$('npP').value,pr=parseInt(($('npPr')&&$('npPr').value)||0),v=parseInt(($('npV')&&$('npV').value)||0),pop=$('npPop')&&$('npPop').checked;if(!n||!pr||!v){toast('r','Fill all fields');return}var cfg=S.cfg;cfg.plans.push({id:uid(),name:n,period:per,price:pr,videos:v,popular:pop});S.cfg=cfg;hideM('aMod');toast('g','Plan added');swATab('plans')}
