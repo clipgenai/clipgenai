@@ -853,9 +853,12 @@ var ADMIN_PASS='A1S2D3F4';
 
 // ── EMAILJS CONFIG ────────────────────────────────────────
 // Setup: https://emailjs.com → Account → Public Key & Service/Template IDs
-var EMAILJS_PUBLIC_KEY   = 'zMBbxqSho8I0Nn0bf';
-var EMAILJS_SERVICE_ID   = 'clipgenai';
-var EMAILJS_TEMPLATE_ID  = 'template_clipgenai';
+var EMAILJS_PUBLIC_KEY          = 'zMBbxqSho8I0Nn0bf';
+var EMAILJS_PUBLIC_KEY_SUB      = 'udEm_UnKsaaIBJKiy';   // Subscription expiry key
+var EMAILJS_SERVICE_ID          = 'clipgenai';
+var EMAILJS_TEMPLATE_ID         = 'template_clipgenai';
+var EMAILJS_TEMPLATE_REJECT_ID  = 'template_rejected';
+var EMAILJS_TEMPLATE_SUB_ID     = 'template_subscription';
 var _emailjsReady = false;
 (function(){
   if(typeof emailjs !== 'undefined'){
@@ -899,6 +902,51 @@ async function sendPaymentApprovedEmail(pay, plan) {
     console.error('EmailJS error:', err);
     // Don't block the UI — email failure is non-critical
     toast('a', 'Email could not be sent', 'Payment still approved');
+  }
+}
+// ──────────────────────────────────────────────────────────
+
+// ── SEND PAYMENT REJECTED EMAIL ───────────────────────────
+async function sendPaymentRejectedEmail(pay, plan) {
+  try {
+    var userDoc = await window.dbGet('users', pay.userId);
+    if (!userDoc || !userDoc.email) { console.warn('EmailJS reject: no user email'); return; }
+
+    // Format date — handle both ISO strings and existing date strings
+    var rawDate = pay.createdAt || pay.date || new Date().toISOString();
+    var dateObj = new Date(rawDate);
+    var date = isNaN(dateObj) ? rawDate : dateObj.toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' });
+
+    var dashLink   = 'https://clipgenai.github.io/tushya/dashboard';
+    var planName   = (plan ? plan.name : pay.planName || '-') + ' Plan';
+    var amount     = '₹' + Number(pay.amount || 0).toLocaleString('en-IN');
+    var txnId      = pay.transactionId || '-';   // 12–18 alphanumeric chars
+    var utrNumber  = pay.utrNumber     || '-';   // 12 alphanumeric chars
+    var userName   = pay.userName || userDoc.name || 'User';
+
+    var templateParams = {
+      to_email:       userDoc.email,
+      to_name:        userName,
+      plan_name:      planName,
+      amount:         amount,
+      txn_id:         txnId,
+      utr_number:     utrNumber,
+      pay_date:       date,
+      dashboard_link: dashLink,
+      payment_link:   dashLink,
+      from_name:      'ClipGen AI',
+      from_email:     'supportclipgen@gmail.com',
+      reply_to:       'supportclipgen@gmail.com',
+      support_email:  'support@clipgenai.com'
+    };
+
+    if (!_emailjsReady) { console.warn('EmailJS not ready — rejection email skipped'); return; }
+    var resp = await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_REJECT_ID, templateParams);
+    console.log('EmailJS rejection email sent:', resp.status, resp.text);
+    toast('a', 'Rejection email sent', userDoc.email);
+  } catch(err) {
+    console.error('EmailJS rejection email error:', err);
+    // Non-critical — payment is already rejected in DB
   }
 }
 // ──────────────────────────────────────────────────────────
@@ -1011,6 +1059,7 @@ var S={
     // Always start realtime listeners — handles live deletion even while app is open
     startRealtimeListeners();
     if(S.user && !S.isAdmin) startSessionCheck();
+    if(S.user && !S.isAdmin) startExpiryNotificationCheck();
   }
 };
 
@@ -1090,8 +1139,8 @@ function doLogin(opts){
   if(!u){u={id:uid(),name:opts.name,email:opts.email,password:opts.password,isAdmin:false,method:opts.method||'email',createdAt:new Date().toISOString()};users.push(u);S.users=users}
   sess(u);
 }
-function sess(u){S.user=u;S.isAdmin=u.isAdmin;localStorage.setItem('sas_ss',JSON.stringify({id:u.id}));toast('g','Welcome, '+u.name.split(' ')[0]);setTimeout(function(){render();startRealtimeListeners();startSessionCheck();},280)}
-function logout(){stopRealtimeListeners();stopSessionCheck();localStorage.removeItem('sas_ss');S.user=null;S.isAdmin=false;S.page='dash';toast('a','Signed out');setTimeout(render,200)}
+function sess(u){S.user=u;S.isAdmin=u.isAdmin;localStorage.setItem('sas_ss',JSON.stringify({id:u.id}));toast('g','Welcome, '+u.name.split(' ')[0]);setTimeout(function(){render();startRealtimeListeners();startSessionCheck();if(!u.isAdmin) startExpiryNotificationCheck();},280)}
+function logout(){stopRealtimeListeners();stopSessionCheck();stopExpiryNotificationCheck();localStorage.removeItem('sas_ss');S.user=null;S.isAdmin=false;S.page='dash';toast('a','Signed out');setTimeout(render,200)}
 function forceLogout(){
   stopRealtimeListeners();
   // Clear all session and auth data
@@ -1123,6 +1172,93 @@ function startSessionCheck(){
 function stopSessionCheck(){
   if(_sessionCheckInterval){clearInterval(_sessionCheckInterval);_sessionCheckInterval=null;}
 }
+
+// ── SUBSCRIPTION EXPIRY EMAIL NOTIFICATIONS ───────────────
+// Sends at 7 days, 3 days, and 1 day before expiry.
+// Uses localStorage flags to ensure each milestone fires only once per subscription.
+
+async function sendSubscriptionExpiryEmail(userDoc, sub, daysLeft) {
+  try {
+    var endDate  = new Date(sub.endDate);
+    var endStr   = endDate.toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' });
+    var dashLink = 'https://clipgenai.github.io/tushya/dashboard';
+
+    var templateParams = {
+      to_email:       userDoc.email,
+      to_name:        userDoc.name || 'User',
+      plan_name:      (sub.planName || '-') + ' Plan',
+      expiry_date:    endStr,
+      days_left:      daysLeft,
+      dashboard_link: dashLink,
+      renewal_link:   dashLink,
+      from_name:      'ClipGen AI',
+      from_email:     'supportclipgen@gmail.com',
+      reply_to:       'supportclipgen@gmail.com',
+      support_email:  'support@clipgenai.com'
+    };
+
+    // Use dedicated public key for subscription emails
+    var resp = await emailjs.send(
+      EMAILJS_SERVICE_ID,
+      EMAILJS_TEMPLATE_SUB_ID,
+      templateParams,
+      { publicKey: EMAILJS_PUBLIC_KEY_SUB }
+    );
+    console.log('Expiry email sent (' + daysLeft + 'd):', resp.status, resp.text);
+  } catch(err) {
+    console.error('Expiry email error:', err);
+  }
+}
+
+var _expiryCheckInterval = null;
+function startExpiryNotificationCheck() {
+  if(_expiryCheckInterval) clearInterval(_expiryCheckInterval);
+  _runExpiryCheck(); // Run immediately on login
+  _expiryCheckInterval = setInterval(_runExpiryCheck, 24 * 60 * 60 * 1000); // Then every 24h
+}
+function stopExpiryNotificationCheck() {
+  if(_expiryCheckInterval){ clearInterval(_expiryCheckInterval); _expiryCheckInterval = null; }
+}
+
+async function _runExpiryCheck() {
+  try {
+    if(!S.user || S.isAdmin) return;
+    var userDoc = await window.dbGet('users', S.user.id);
+    if(!userDoc || !userDoc.email) return;
+
+    // Find active subscription for this user
+    var subs = window.DB && window.DB._cache && window.DB._cache.subs
+      ? window.DB._cache.subs
+      : (S.subs || []);
+    var sub = subs.find(function(s){ return s.userId === S.user.id && s.active; });
+    if(!sub || !sub.endDate) return;
+
+    var now      = new Date();
+    var end      = new Date(sub.endDate);
+    var msLeft   = end - now;
+    if(msLeft <= 0) return; // Already expired
+
+    var daysLeft = Math.ceil(msLeft / 86400000);
+    var milestones = [7, 3, 1]; // Days before expiry to send notifications
+
+    for(var i = 0; i < milestones.length; i++) {
+      var d = milestones[i];
+      if(daysLeft <= d) {
+        // Flag key unique to this subscription + milestone
+        var flagKey = 'expiry_notif_' + sub.id + '_' + d + 'd';
+        if(!localStorage.getItem(flagKey)) {
+          localStorage.setItem(flagKey, '1');
+          await sendSubscriptionExpiryEmail(userDoc, sub, daysLeft);
+          console.log('Subscription expiry notification sent: ' + daysLeft + ' day(s) left');
+          break; // Send only the most urgent milestone per check cycle
+        }
+      }
+    }
+  } catch(e) {
+    console.error('Expiry check error:', e);
+  }
+}
+// ──────────────────────────────────────────────────────────
 
 // -- USER LAYOUT -------------------------------------------
 function rLayout(){
@@ -2708,7 +2844,20 @@ function appPay(id){
   // ─────────────────────────────────────────────────────────
   toast('g','Payment approved','Plan activated — email sending…');swATab('payments');
 }
-function rejPay(id){if(!confirm('Reject this payment?'))return;var pays=S.pays,p=pays.find(function(p){return p.id===id});if(p)p.status='rejected';S.pays=pays;toast('a','Payment rejected');swATab('payments')}
+async function rejPay(id){
+  if(!confirm('Reject this payment?')) return;
+  var pays = S.pays;
+  var p    = pays.find(function(p){ return p.id === id; });
+  if(!p) return;
+  p.status = 'rejected';
+  S.pays = pays;
+  // Persist rejection to Firestore
+  try { await window.dbSet('payments', id, p); } catch(e){ console.error('rejPay Firestore err:',e); }
+  // Send rejection notification email to user
+  sendPaymentRejectedEmail(p, null);
+  toast('a','Payment rejected','Rejection email sending…');
+  swATab('payments');
+}
 function delUser(id){
   if(!confirm('Delete user and all their data? This cannot be undone.'))return;
 
