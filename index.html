@@ -987,7 +987,7 @@ function rAuth(mode){
   '<div class="ao" style="width:420px;height:420px;top:-110px;left:-90px;background:radial-gradient(circle,rgba(157,113,255,.08),transparent 70%)"></div>'+
   '<div class="ao" style="width:320px;height:320px;bottom:-80px;right:-70px;background:radial-gradient(circle,rgba(91,164,245,.06),transparent 70%)"></div>'+
   '<div class="ac g2">'+
-  '<div class="brd"><div class="brk">&#127916;</div><span class="brn">ClipGen AI</span></div>'+
+  '<div class="brd"><div class="brk"><img src="https://clipgenai.github.io/logo/ClipGen.png" alt="ClipGen AI" style="width:22px;height:22px;object-fit:contain;border-radius:4px"></div><span class="brn">ClipGen AI</span></div>'+
   '<div class="ah">'+(isL?'Welcome back':'Create account')+'</div>'+
   '<div class="as">'+(isL?'Sign in to your creator dashboard':'Start ordering AI-generated short videos')+'</div>'+
   '<button class="gbtn" id="btnGoo">Continue with Google</button>'+
@@ -1074,7 +1074,7 @@ function stopSessionCheck(){
 // -- USER LAYOUT -------------------------------------------
 function rLayout(){
   return '<div class="lay"><header class="hdr">'+
-  '<div class="hb"><div class="hm">&#127916;</div>ClipGen AI</div>'+
+  '<div class="hb"><div class="hm"><img src="https://clipgenai.github.io/logo/ClipGen.png" alt="ClipGen AI" style="width:20px;height:20px;object-fit:contain;border-radius:3px"></div>ClipGen AI</div>'+
   '<div class="hr"><button class="ib" id="btnTh">'+(S.theme==='dark'?'o':'o')+'</button><button class="ib" id="btnBl" title="Announcements">&#128276;</button><div class="av" id="btnAv">'+((S.user.name||'U')[0].toUpperCase())+'</div></div>'+
   '</header><main class="main">'+
   '<div class="pg on" id="pg-dash">'+rDashSkeleton()+'</div>'+
